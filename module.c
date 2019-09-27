@@ -56,13 +56,11 @@ static int bmstu_inode_permission(struct inode *inode, int mask)
 		return 0;
 	}
 
-	// Don't check this if it is a directory
 	if ((inode->i_mode & S_IFMT) == S_IFDIR) {
+		return 0;
 	}
 		
 	const struct cred *cred = current_cred();	
-	printk("bmstuLogs inode_permission hook, uid %i\n", cred->uid);	
-		
 	struct dentry *dentry;
 	char buf[64];
     const char *path;
@@ -70,7 +68,10 @@ static int bmstu_inode_permission(struct inode *inode, int mask)
 	spin_lock(&inode->i_lock);
 	hlist_for_each_entry(dentry, &inode->i_dentry, d_u.d_alias) {
     	path = dentry_path_raw(dentry, buf, sizeof(buf));
-    	printk("bmstuLogs inode_permission path %s\n", path);
+		if(strstr(path, "/home/") != NULL)
+		{
+			printk("bmstuLogs inode_permission path %s\n", path);
+		}
     }
 	spin_unlock(&inode->i_lock);	
 		
@@ -97,6 +98,11 @@ static int bmstu_file_permission(struct file *file, int mask)
     dentry = file->f_path.dentry->d_iname;
     parent_dentry = file->f_path.dentry->d_parent->d_iname;
     path = dentry_path_raw(file->f_path.dentry, buff, 256);
+
+	if(strstr(path, "/home/") == NULL)
+	{
+		return 0;
+	}
 	
 	printk("bmstuLogs file_permission hook at %s, mask %i\n", path, mask);
 	return 0;
@@ -115,24 +121,81 @@ static int bmstu_file_open(struct file *file)
 	}
 	
 	char *path;
-    char *dentry;
+    char *current_dentry;
     char *parent_dentry;
     char buff[256];
     
-    dentry = file->f_path.dentry->d_iname;
+    current_dentry = file->f_path.dentry->d_iname;
     parent_dentry = file->f_path.dentry->d_parent->d_iname;
     path = dentry_path_raw(file->f_path.dentry, buff, 256);
-    	
-	if (strcmp(path, "/home/qemu/dir") == 0)
+    
+	if(strstr(path, "/home/") == NULL)
 	{
-	    printk(KERN_ALERT "You shall not pass!\n");
+		return 0;
+	}
+
+	char buf[1024];
+	int size_buf = 1024;
+	int res;
+
+	res = vfs_getxattr(file->f_path.dentry, "user.bmstu", buf, size_buf);
+	
+	if (strcmp(buf, "bruh") == 0)
+	{
+	    printk("file open: You shall not pass!\n");
         return -EACCES;
 	}
 
-	//printk("bmstuLogs file_open hook at %s\n", path);
-	
+	printk("bmstuLogs file_open hook at %s, xattr %s, res %d\n", path, buf, res);
 	return 0;
-}				     
+}				   
+
+static int bmstu_inode_setxattr(struct dentry *dentry, const char *name,
+				  const void *value, size_t size, int flags)
+{
+	if (is_root_uid())
+	{
+		return 0;
+	}
+
+	struct inode *inode = d_backing_inode(dentry);
+	printk("bmstuLogs bmstu_inode_setxattr hook %s\n", name);
+	return 0;
+}
+
+static int bmstu_inode_getxattr(struct dentry *dentry, const char *name)
+{
+	if (is_root_uid())
+	{
+		return 0;
+	}
+
+	printk("bmstuLogs bmstu_inode_getxattr hook %s\n", name);
+	return 0;
+}
+
+static int bmstu_inode_listxattr(struct dentry *dentry)
+{
+	if (is_root_uid())
+	{
+		return 0;
+	}
+
+	const struct cred *cred = current_cred();
+	printk("bmstuLogs bmstu_inode_listxattr hook\n");
+	return 0;
+}
+
+static int bmstu_inode_removexattr(struct dentry *dentry, const char *name)
+{
+	if (is_root_uid())
+	{
+		return 0;
+	}
+
+	printk("bmstuLogs bmstu_inode_removexattr hook %s\n", name);
+	return 0;
+}
 
 //---HOOKS REGISTERING
 static struct security_hook_list bmstu_hooks[] =
@@ -140,6 +203,11 @@ static struct security_hook_list bmstu_hooks[] =
 	//LSM_HOOK_INIT(inode_permission, bmstu_inode_permission),
 	//LSM_HOOK_INIT(file_permission, bmstu_file_permission),
 	LSM_HOOK_INIT(file_open, bmstu_file_open),
+	
+	//LSM_HOOK_INIT(inode_setxattr, bmstu_inode_setxattr),
+	//LSM_HOOK_INIT(inode_getxattr, bmstu_inode_getxattr),
+	//LSM_HOOK_INIT(inode_listxattr, bmstu_inode_listxattr),
+	//LSM_HOOK_INIT(inode_removexattr, bmstu_inode_removexattr),
 };
 
 //---INIT

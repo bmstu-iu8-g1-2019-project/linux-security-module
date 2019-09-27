@@ -39,12 +39,38 @@
 #include <linux/string.h>
 #include <linux/uidgid.h>
 #include <linux/lsm_hooks.h>
+#include <linux/usb.h>
 
+MODULE_AUTHOR("fktrc");
+MODULE_DESCRIPTION("BMSTU Linux Security Module");
 MODULE_LICENSE("GPL");
+MODULE_VERSION("0.0.1");
 
 
 static inline bool is_root_uid(void) {
 	return uid_eq(current_uid(), GLOBAL_ROOT_UID);
+}
+
+static int match_device(struct usb_device *dev, void *p)
+{
+    char *product = dev->product;
+    char *manufacturer = dev->manufacturer;
+    char *serial = dev->serial;
+    
+	printk("bmstuLogs usb_device product %s, serial %s\n", product, serial);
+	if (strcmp(serial, "9HHORL8W") == 0)
+	{
+		return 1;
+	}
+	
+	return 0;
+}
+
+static int find_usb_device(void)
+{
+	void *p;
+	int match = usb_for_each_dev(p, match_device);
+    return match;
 }
 
 //---HOOKS
@@ -140,15 +166,22 @@ static int bmstu_file_open(struct file *file)
 
 	res = vfs_getxattr(file->f_path.dentry, "user.bmstu", buf, size_buf);
 	
-	if (strcmp(buf, "bruh") == 0)
+	if (strcmp(buf, "bruh") != 0)
 	{
-	    printk("file open: You shall not pass!\n");
-        return -EACCES;
+		printk("bmstuLogs file open at %s\n", path);
+        return 0;
 	}
-
-	printk("bmstuLogs file_open hook at %s, xattr %s, res %d\n", path, buf, res);
-	return 0;
-}				   
+	
+	if (find_usb_device())
+	{
+		printk("bmstuLogs file open at %s\n", path);
+		printk("bmstuLogs USB device found. Access granted!\n");
+        return 0;
+	}
+	
+    printk("file open: You shall not pass!\n");
+    return -EACCES;
+}					   
 
 static int bmstu_inode_setxattr(struct dentry *dentry, const char *name,
 				  const void *value, size_t size, int flags)

@@ -4,6 +4,9 @@
 #include <linux/syscalls.h>
 #include <linux/fs.h>
 
+#include <linux/path.h>
+#include <linux/namei.h>
+
 MODULE_AUTHOR("fktrc");
 MODULE_DESCRIPTION("BMSTU Linux Security Module");
 MODULE_LICENSE("GPL");
@@ -100,11 +103,12 @@ int file_may_access(struct file *file)
     return -EACCES;
 }
 
-int inode_may_access(struct inode *inode)
+int inode_may_access(struct inode *inode, int mask)
 {
     struct dentry *dentry;
-    char *path = NULL;
+    char *path_raw = NULL;
     char buf[64];
+    int res;
 
     if (is_root_uid()) {
         return 0;
@@ -117,19 +121,21 @@ int inode_may_access(struct inode *inode)
     spin_lock(&inode->i_lock);
     hlist_for_each_entry(dentry, &inode->i_dentry, d_u.d_alias)
     {
-        path = dentry_path_raw(dentry, buf, sizeof(buf));
+        path_raw = dentry_path_raw(dentry, buf, sizeof(buf));
     }
     spin_unlock(&inode->i_lock);
 
-    if (path == NULL) {
+    if (path_raw == NULL) {
         return 0;
     }
 
-    if (strstr(path, "/home/") == NULL) {
+    if (strstr(path_raw, "/home/") == NULL) {
         return 0;
     }
 
-    printk("bmstuLogs inode_may_access %s\n", path);
+    res = __vfs_getxattr(dentry, inode, "user.bmstu", NULL, 0);
+
+    printk("bmstuLogs inode_may_access %s, mask %d, attr %d\n", path_raw, mask, res);
 
     return 0;
 }
@@ -143,12 +149,34 @@ static int bmstu_file_open(struct file *file)
 
 static int bmstu_file_permission(struct file *file, int mask)
 {
-    return file_may_access(file);
+    char *path;
+    char *current_dentry;
+    char *parent_dentry;
+    char buff[256];
+
+    if (is_root_uid()) {
+        return 0;
+    }
+
+    if (!file) {
+        return 0;
+    }
+
+    current_dentry = file->f_path.dentry->d_iname;
+    parent_dentry = file->f_path.dentry->d_parent->d_iname;
+    path = dentry_path_raw(file->f_path.dentry, buff, 256);
+
+    if (strstr(path, "/home/") == NULL) {
+        return 0;
+    }
+
+    printk("bmstuLogs file permission %s, mask %d\n", path, mask);
+    return 0;
 }
 
 static int bmstu_inode_permission(struct inode *inode, int mask)
 {
-    return inode_may_access(inode);
+    return inode_may_access(inode, mask);
 }
 
 static int bmstu_inode_setxattr(struct dentry *dentry, const char *name,
@@ -183,10 +211,10 @@ static int bmstu_inode_removexattr(struct dentry *dentry, const char *name)
 //---HOOKS REGISTERING
 static struct security_hook_list bmstu_hooks[] =
         {
-                LSM_HOOK_INIT(file_open, bmstu_file_open),
                 LSM_HOOK_INIT(file_permission, bmstu_file_permission),
 
                 LSM_HOOK_INIT(inode_permission, bmstu_inode_permission),
+
                 LSM_HOOK_INIT(inode_setxattr, bmstu_inode_setxattr),
                 LSM_HOOK_INIT(inode_getxattr, bmstu_inode_getxattr),
                 LSM_HOOK_INIT(inode_listxattr, bmstu_inode_listxattr),

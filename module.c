@@ -54,7 +54,7 @@ char *get_file_xattr(struct file *file)
         return NULL;
     }
 
-    res = vfs_getxattr(file->f_path.dentry, "user.bmstu", buff, size_buff);
+    res = vfs_getxattr(file->f_path.dentry, "security.bmstu", buff, size_buff);
     return buff;
 }
 
@@ -107,8 +107,11 @@ int inode_may_access(struct inode *inode, int mask)
 {
     struct dentry *dentry;
     char *path_raw = NULL;
-    char buf[64];
+    char buff_path[64];
     int res;
+
+    char *buff_xattr;
+    int size_buff_xattr;
 
     if (is_root_uid()) {
         return 0;
@@ -121,7 +124,7 @@ int inode_may_access(struct inode *inode, int mask)
     spin_lock(&inode->i_lock);
     hlist_for_each_entry(dentry, &inode->i_dentry, d_u.d_alias)
     {
-        path_raw = dentry_path_raw(dentry, buf, sizeof(buf));
+        path_raw = dentry_path_raw(dentry, buff_path, sizeof(buff_path));
     }
     spin_unlock(&inode->i_lock);
 
@@ -133,9 +136,16 @@ int inode_may_access(struct inode *inode, int mask)
         return 0;
     }
 
-    res = __vfs_getxattr(dentry, inode, "user.bmstu", NULL, 0);
+    buff_xattr = kcalloc(32, sizeof(char), GFP_KERNEL);
+    size_buff_xattr = 32 * sizeof(char);
 
-    printk("bmstuLogs inode_may_access %s, mask %d, attr %d\n", path_raw, mask, res);
+    if (buff_xattr == NULL) {
+        return -EACCES;
+    }
+
+    res = __vfs_getxattr(dentry, inode, "security.bmstu", buff_xattr, size_buff_xattr);
+    printk("bmstuLogs inode access %s, mask %d, attr %d:%s\n",
+        path_raw, mask, res, buff_xattr);
 
     return 0;
 }
@@ -211,7 +221,8 @@ static int bmstu_inode_removexattr(struct dentry *dentry, const char *name)
 //---HOOKS REGISTERING
 static struct security_hook_list bmstu_hooks[] =
         {
-                LSM_HOOK_INIT(file_permission, bmstu_file_permission),
+                //LSM_HOOK_INIT(file_permission, bmstu_file_permission),
+                //LSM_HOOK_INIT(file_open, bmstu_file_open),
 
                 LSM_HOOK_INIT(inode_permission, bmstu_inode_permission),
 

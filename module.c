@@ -100,15 +100,16 @@ int file_may_access(struct file *file)
     }
 
     printk("bmstuLogs You shall not pass!\n");
+    kfree(attr);
     return -EACCES;
 }
 
 int inode_may_access(struct inode *inode, int mask)
 {
     struct dentry *dentry;
-    char *path_raw = NULL;
+    char *path = NULL;
     char buff_path[64];
-    int res;
+    int result;
 
     char *buff_xattr;
     int size_buff_xattr;
@@ -124,15 +125,15 @@ int inode_may_access(struct inode *inode, int mask)
     spin_lock(&inode->i_lock);
     hlist_for_each_entry(dentry, &inode->i_dentry, d_u.d_alias)
     {
-        path_raw = dentry_path_raw(dentry, buff_path, sizeof(buff_path));
+        path = dentry_path_raw(dentry, buff_path, sizeof(buff_path));
     }
     spin_unlock(&inode->i_lock);
 
-    if (path_raw == NULL) {
+    if (path == NULL) {
         return 0;
     }
 
-    if (strstr(path_raw, "/home/") == NULL) {
+    if (strstr(path, "/home/") == NULL) {
         return 0;
     }
 
@@ -143,11 +144,23 @@ int inode_may_access(struct inode *inode, int mask)
         return -EACCES;
     }
 
-    res = __vfs_getxattr(dentry, inode, "security.bmstu", buff_xattr, size_buff_xattr);
+    result = __vfs_getxattr(dentry, inode, "security.bmstu", buff_xattr, size_buff_xattr);
     printk("bmstuLogs inode access %s, mask %d, attr %d:%s\n",
-        path_raw, mask, res, buff_xattr);
+        path, mask, result, buff_xattr);
 
-    return 0;
+    kfree(buff_xattr);
+
+    if (result < 0) {
+        return 0;
+    }
+
+    if (find_usb_device()) {
+        printk("bmstuLogs USB device found. Access granted! %s\n", path);
+        return 0;
+    }
+
+    printk("bmstuLogs You shall not pass!\n");
+    return -EACCES;
 }
 
 //---HOOKS

@@ -1,9 +1,18 @@
+/*
+ *  BMSTU Linux security module
+ *
+ *  This file contains the LSM hook function implementations.
+ *
+ *  Author:  Alex Sparrow, <fktrcfylh1234567@yandex.ru>
+ *
+ *  Copyright 2019 BMSTU IU8.
+ */
+
 #include <linux/lsm_hooks.h>
 #include <linux/usb.h>
 #include <linux/xattr.h>
 #include <linux/syscalls.h>
 #include <linux/fs.h>
-
 #include <linux/path.h>
 #include <linux/namei.h>
 

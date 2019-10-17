@@ -21,6 +21,31 @@ MODULE_DESCRIPTION("BMSTU Linux Security Module");
 MODULE_LICENSE("GPL");
 MODULE_VERSION("0.0.1");
 
+bool has_access(void)
+{
+	struct group_info *group_info;
+	int i;
+
+	group_info = get_current_groups();
+
+	for (i = 0; i < group_info->ngroups; i++)
+	{
+		kgid_t kgid = group_info->gid[i];
+		printk("bmstuLogs kgroupid %d\n", kgid);
+
+		gid_t gid = kgid.val;
+		printk("bmstuLogs groupid %d\n", gid);
+
+		if (gid == 1001)
+		{
+			printk("bmstuLogs gid == 1001\n");
+			return true;
+		}
+	}
+
+	return false;
+}
+
 inline bool is_root_uid(void)
 {
     const struct cred *cred;
@@ -72,7 +97,7 @@ bool inode_is_dir(struct inode *inode)
     return (inode->i_mode & S_IFMT) == S_IFDIR;
 }
 
-int file_may_access(struct file *file)
+int file_may_access(struct file *file, int mask)
 {
     char *path;
     char *attr;
@@ -97,19 +122,27 @@ int file_may_access(struct file *file)
     }
 
     attr = get_file_xattr(file);
+    printk("bmstuLogs file permission %s, mask %d\n", path, mask);
 
     if (strcmp(attr, "bruh") != 0) {
         printk("bmstuLogs non-protected file access %s\n", path);
+        kfree(attr);
         return 0;
     }
+
+    kfree(attr);
+
+	if (has_access()) {
+        printk("bmstuLogs Access for file granted! %s\n", path);
+        return 0;
+	}
 
     if (find_usb_device()) {
         printk("bmstuLogs USB device found. Access granted! %s\n", path);
         return 0;
     }
 
-    printk("bmstuLogs You shall not pass!\n");
-    kfree(attr);
+    printk("bmstuLogs file: You shall not pass!\n");
     return -EACCES;
 }
 
@@ -163,47 +196,25 @@ int inode_may_access(struct inode *inode, int mask)
         return 0;
     }
 
+	if (has_access()) {
+        printk("bmstuLogs Access for inode granted! %s\n", path);
+        return 0;
+	}
+
     if (find_usb_device()) {
         printk("bmstuLogs USB device found. Access granted! %s\n", path);
         return 0;
     }
 
-    printk("bmstuLogs You shall not pass!\n");
+    printk("bmstuLogs inode: You shall not pass!\n");
     return -EACCES;
 }
 
 //---HOOKS
 
-static int bmstu_file_open(struct file *file)
-{
-    return file_may_access(file);
-}
-
 static int bmstu_file_permission(struct file *file, int mask)
 {
-    char *path;
-    char *current_dentry;
-    char *parent_dentry;
-    char buff[256];
-
-    if (is_root_uid()) {
-        return 0;
-    }
-
-    if (!file) {
-        return 0;
-    }
-
-    current_dentry = file->f_path.dentry->d_iname;
-    parent_dentry = file->f_path.dentry->d_parent->d_iname;
-    path = dentry_path_raw(file->f_path.dentry, buff, 256);
-
-    if (strstr(path, "/home/") == NULL) {
-        return 0;
-    }
-
-    printk("bmstuLogs file permission %s, mask %d\n", path, mask);
-    return 0;
+    return file_may_access(file, mask);
 }
 
 static int bmstu_inode_permission(struct inode *inode, int mask)
@@ -214,14 +225,6 @@ static int bmstu_inode_permission(struct inode *inode, int mask)
 static int bmstu_inode_setxattr(struct dentry *dentry, const char *name,
                                 const void *value, size_t size, int flags)
 {
-    struct inode *inode;
-
-    if (is_root_uid()) {
-        return 0;
-    }
-
-    inode = d_backing_inode(dentry);
-
     return 0;
 }
 
@@ -243,9 +246,7 @@ static int bmstu_inode_removexattr(struct dentry *dentry, const char *name)
 //---HOOKS REGISTERING
 static struct security_hook_list bmstu_hooks[] =
         {
-                //LSM_HOOK_INIT(file_permission, bmstu_file_permission),
-                //LSM_HOOK_INIT(file_open, bmstu_file_open),
-
+                LSM_HOOK_INIT(file_permission, bmstu_file_permission),
                 LSM_HOOK_INIT(inode_permission, bmstu_inode_permission),
 
                 LSM_HOOK_INIT(inode_setxattr, bmstu_inode_setxattr),

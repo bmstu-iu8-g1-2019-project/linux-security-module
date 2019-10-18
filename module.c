@@ -21,7 +21,7 @@ MODULE_DESCRIPTION("BMSTU Linux Security Module");
 MODULE_LICENSE("GPL");
 MODULE_VERSION("0.0.1");
 
-bool has_access(void)
+bool has_gid(unsigned int target_gid)
 {
 	struct group_info *group_info;
 	int i;
@@ -31,14 +31,11 @@ bool has_access(void)
 	for (i = 0; i < group_info->ngroups; i++)
 	{
 		kgid_t kgid = group_info->gid[i];
-		printk("bmstuLogs kgroupid %d\n", kgid);
-
 		gid_t gid = kgid.val;
 		printk("bmstuLogs groupid %d\n", gid);
 
-		if (gid == 1001)
+		if (gid == target_gid)
 		{
-			printk("bmstuLogs gid == 1001\n");
 			return true;
 		}
 	}
@@ -132,7 +129,7 @@ int file_may_access(struct file *file, int mask)
 
     kfree(attr);
 
-	if (has_access()) {
+	if (has_gid(1000)) {
         printk("bmstuLogs Access for file granted! %s\n", path);
         return 0;
 	}
@@ -152,6 +149,7 @@ int inode_may_access(struct inode *inode, int mask)
     char *path = NULL;
     char buff_path[64];
     int result;
+    unsigned int gid = 0;
 
     char *buff_xattr;
     int size_buff_xattr;
@@ -187,16 +185,24 @@ int inode_may_access(struct inode *inode, int mask)
     }
 
     result = __vfs_getxattr(dentry, inode, "security.bmstu", buff_xattr, size_buff_xattr);
-    printk("bmstuLogs inode access %s, mask %d, attr %d:%s\n",
-        path, mask, result, buff_xattr);
+
+    if (result < 0) {
+        kfree(buff_xattr);
+        return 0;
+    }
+
+    result = kstrtouint(buff_xattr, 0, &gid);
+    printk("bmstuLogs inode access %s, mask %d, attr %s, expect GID %d\n",
+        path, mask, buff_xattr, gid);
 
     kfree(buff_xattr);
 
+    // Incorrect value in xattr
     if (result < 0) {
         return 0;
     }
 
-	if (has_access()) {
+	if (has_gid(gid)) {
         printk("bmstuLogs Access for inode granted! %s\n", path);
         return 0;
 	}
@@ -246,7 +252,7 @@ static int bmstu_inode_removexattr(struct dentry *dentry, const char *name)
 //---HOOKS REGISTERING
 static struct security_hook_list bmstu_hooks[] =
         {
-                LSM_HOOK_INIT(file_permission, bmstu_file_permission),
+                //LSM_HOOK_INIT(file_permission, bmstu_file_permission),
                 LSM_HOOK_INIT(inode_permission, bmstu_inode_permission),
 
                 LSM_HOOK_INIT(inode_setxattr, bmstu_inode_setxattr),

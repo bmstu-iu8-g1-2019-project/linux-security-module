@@ -43,7 +43,7 @@ bool has_gid(unsigned int target_gid)
 	return false;
 }
 
-inline bool is_root_uid(void)
+bool is_root_uid(void)
 {
     const struct cred *cred;
     cred = current_cred();
@@ -75,20 +75,6 @@ int find_usb_device(void)
     return match;
 }
 
-char *get_file_xattr(struct file *file)
-{
-    char *buff = kcalloc(32, sizeof(char), GFP_KERNEL);
-    int size_buff = 32 * sizeof(char);
-    int res;
-
-    if (buff == NULL) {
-        return NULL;
-    }
-
-    res = vfs_getxattr(file->f_path.dentry, "security.bmstu", buff, size_buff);
-    return buff;
-}
-
 bool inode_is_dir(struct inode *inode)
 {
     return (inode->i_mode & S_IFMT) == S_IFDIR;
@@ -101,6 +87,8 @@ int file_may_access(struct file *file, int mask)
     char *current_dentry;
     char *parent_dentry;
     char buff[256];
+    int size_buff;
+    int err;
 
     if (is_root_uid()) {
         return 0;
@@ -114,33 +102,22 @@ int file_may_access(struct file *file, int mask)
     parent_dentry = file->f_path.dentry->d_parent->d_iname;
     path = dentry_path_raw(file->f_path.dentry, buff, 256);
 
-    if (strstr(path, "/home/") == NULL) {
-        return 0;
+    attr = kcalloc(32, sizeof(char), GFP_KERNEL);
+    size_buff = 32 * sizeof(char);
+
+    if (attr == NULL) {
+        return -EACCES;
     }
 
-    attr = get_file_xattr(file);
-    printk("bmstuLogs file permission %s, mask %d\n", path, mask);
+    err = vfs_getxattr(file->f_path.dentry, "security.bmstu", attr, size_buff);
 
-    if (strcmp(attr, "bruh") != 0) {
-        printk("bmstuLogs non-protected file access %s\n", path);
-        kfree(attr);
-        return 0;
-    }
-
-    kfree(attr);
-
-	if (has_gid(1000)) {
-        printk("bmstuLogs Access for file granted! %s\n", path);
-        return 0;
+	if (err < 0) {
+    	return 0;
 	}
 
-    if (find_usb_device()) {
-        printk("bmstuLogs USB device found. Access granted! %s\n", path);
-        return 0;
-    }
+    printk("bmstuLogs file permission %s, mask %d, attr %s\n", path, mask, attr);
 
-    printk("bmstuLogs file: You shall not pass!\n");
-    return -EACCES;
+    return 0;
 }
 
 int inode_may_access(struct inode *inode, int mask)
@@ -148,11 +125,11 @@ int inode_may_access(struct inode *inode, int mask)
     struct dentry *dentry;
     char *path = NULL;
     char buff_path[64];
-    int result;
+    int err;
     unsigned int gid = 0;
 
-    char *buff_xattr;
-    int size_buff_xattr;
+    char *attr;
+    int size_buff;
 
     if (is_root_uid()) {
         return 0;
@@ -177,28 +154,28 @@ int inode_may_access(struct inode *inode, int mask)
         return 0;
     }
 
-    buff_xattr = kcalloc(32, sizeof(char), GFP_KERNEL);
-    size_buff_xattr = 32 * sizeof(char);
+    attr = kcalloc(32, sizeof(char), GFP_KERNEL);
+    size_buff = 32 * sizeof(char);
 
-    if (buff_xattr == NULL) {
+    if (attr == NULL) {
         return -EACCES;
     }
 
-    result = __vfs_getxattr(dentry, inode, "security.bmstu", buff_xattr, size_buff_xattr);
+    err = __vfs_getxattr(dentry, inode, "security.bmstu", attr, size_buff);
 
-    if (result < 0) {
-        kfree(buff_xattr);
+    if (err < 0) {
+        kfree(attr);
         return 0;
     }
 
-    result = kstrtouint(buff_xattr, 0, &gid);
+    err = kstrtouint(attr, 0, &gid);
     printk("bmstuLogs inode access %s, mask %d, attr %s, expect GID %d\n",
-        path, mask, buff_xattr, gid);
+        path, mask, attr, gid);
 
-    kfree(buff_xattr);
+    kfree(attr);
 
     // Incorrect value in xattr
-    if (result < 0) {
+    if (err < 0) {
         return 0;
     }
 
@@ -252,7 +229,7 @@ static int bmstu_inode_removexattr(struct dentry *dentry, const char *name)
 //---HOOKS REGISTERING
 static struct security_hook_list bmstu_hooks[] =
         {
-                //LSM_HOOK_INIT(file_permission, bmstu_file_permission),
+                LSM_HOOK_INIT(file_permission, bmstu_file_permission),
                 LSM_HOOK_INIT(inode_permission, bmstu_inode_permission),
 
                 LSM_HOOK_INIT(inode_setxattr, bmstu_inode_setxattr),

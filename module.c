@@ -156,19 +156,23 @@ static int inode_may_access(struct inode *inode, int mask)
     err = kstrtouint(attr, 0, &gid);
     kfree(attr);
 
-    printk("bmstuLogs inode access %s, mask %d, expect GID %d\n", path, mask, gid);
-
     // Incorrect value in xattr
     if (err < 0) {
         return 0;
+    }
+
+    if (mask & MAY_READ) {
+    printk("bmstuLogs inode access read %s, mask %d, expect GID %d\n", path, mask, gid);
+    }
+
+    if (mask & MAY_WRITE) {
+    printk("bmstuLogs inode access write %s, mask %d, expect GID %d\n", path, mask, gid);
     }
 
 	if (!has_gid(gid)) {
 	    printk("bmstuLogs inode: You shall not pass!\n");
         return -EACCES;
 	}
-
-	read_config_file();
 
     printk("bmstuLogs Access for inode granted! %s\n", path);
     return 0;

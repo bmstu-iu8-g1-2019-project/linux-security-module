@@ -16,6 +16,9 @@
 #include <linux/path.h>
 #include <linux/namei.h>
 
+#include <asm/uaccess.h>
+#include <linux/kernel.h>
+
 MODULE_AUTHOR("fktrc");
 MODULE_DESCRIPTION("BMSTU Linux Security Module");
 MODULE_LICENSE("GPL");
@@ -73,6 +76,33 @@ static int find_usb_device(void)
     void *p = NULL;
     bool match = usb_for_each_dev(p, match_device);
     return match;
+}
+
+static void read_config_file(void)
+{
+    struct file *f;
+    char *buff;
+    int size_buff;
+
+    f = filp_open("/etc/bmstu", O_RDONLY, 0);
+
+    if(f == NULL) {
+        printk("bmstuLogs filp_open error\n");
+        return;
+    }
+
+    buff = kcalloc(32, sizeof(char), GFP_KERNEL);
+    size_buff = 32 * sizeof(char);
+
+    if (buff == NULL) {
+        return;
+    }
+
+    kernel_read(f, buff, size_buff, 0);
+    printk("%s", buff);
+
+    filp_close(f, NULL);
+    kfree(buff);
 }
 
 static int inode_may_access(struct inode *inode, int mask)
@@ -133,13 +163,15 @@ static int inode_may_access(struct inode *inode, int mask)
         return 0;
     }
 
-	if (has_gid(gid)) {
-        printk("bmstuLogs Access for inode granted! %s\n", path);
-        return 0;
+	if (!has_gid(gid)) {
+	    printk("bmstuLogs inode: You shall not pass!\n");
+        return -EACCES;
 	}
 
-    printk("bmstuLogs inode: You shall not pass!\n");
-    return -EACCES;
+	read_config_file();
+
+    printk("bmstuLogs Access for inode granted! %s\n", path);
+    return 0;
 }
 
 static int xattr_may_change(struct dentry *dentry, const char *name)

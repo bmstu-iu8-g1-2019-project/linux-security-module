@@ -43,7 +43,6 @@ static bool has_gid(unsigned int target_gid)
 	{
 		kgid_t kgid = group_info->gid[i];
 		gid_t gid = kgid.val;
-		printk("bmstuLogs groupid %d\n", gid);
 
 		if (gid == target_gid)
 		{
@@ -71,8 +70,7 @@ static int match_device(struct usb_device *dev, void *p)
     manufacturer = dev->manufacturer;
     serial = dev->serial;
 
-    printk("bmstuLogs usb_device product %s, serial %s\n", product, serial);
-    if (strcmp(serial, "9HHORL8W") == 0) {
+    if (strcmp(serial, (char *) p) == 0) {
         return 1;
     }
 
@@ -88,7 +86,7 @@ static int find_usb_device(void)
 	for (; i < bmstu_users_count; i++) {
 		if (uid_eq(current_uid(), bmstu_users[i].uid)) {
 			p = bmstu_users[i].token_serial;
-			printk("bmstuLogs your serial %s\n", p);
+			printk("bmstuLogs your serial %s\n", (char *) p);
 			break;
 		}
 	}
@@ -181,11 +179,11 @@ static int inode_may_access(struct inode *inode, int mask)
     }
 
     if (mask & MAY_READ) {
-    printk("bmstuLogs inode access read %s, mask %d, expect GID %d\n", path, mask, gid);
+    	printk("bmstuLogs inode access read %s, mask %d, expect GID %d\n", path, mask, gid);
     }
 
     if (mask & MAY_WRITE) {
-    printk("bmstuLogs inode access write %s, mask %d, expect GID %d\n", path, mask, gid);
+    	printk("bmstuLogs inode access write %s, mask %d, expect GID %d\n", path, mask, gid);
     }
 
 	if (!has_gid(gid)) {
@@ -193,7 +191,10 @@ static int inode_may_access(struct inode *inode, int mask)
         return -EACCES;
 	}
 
-	find_usb_device();
+	if (!find_usb_device()) {
+	    printk("bmstuLogs inode: You shall not pass!\n");
+        return -EACCES;
+	}
 
     printk("bmstuLogs Access for inode granted! %s\n", path);
     return 0;

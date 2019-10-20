@@ -24,6 +24,14 @@ MODULE_DESCRIPTION("BMSTU Linux Security Module");
 MODULE_LICENSE("GPL");
 MODULE_VERSION("0.0.1");
 
+struct bmstu_user {
+	kuid_t uid;
+	char* token_serial;
+};
+
+struct bmstu_user *bmstu_users;
+size_t bmstu_users_count;
+
 static bool has_gid(unsigned int target_gid)
 {
 	struct group_info *group_info;
@@ -74,7 +82,18 @@ static int match_device(struct usb_device *dev, void *p)
 static int find_usb_device(void)
 {
     void *p = NULL;
-    bool match = usb_for_each_dev(p, match_device);
+    bool match = false;
+    int i = 0;
+
+	for (; i < bmstu_users_count; i++) {
+		if (uid_eq(current_uid(), bmstu_users[i].uid)) {
+			p = bmstu_users[i].token_serial;
+			printk("bmstuLogs your serial %s\n", p);
+			break;
+		}
+	}
+
+    match = usb_for_each_dev(p, match_device);
     return match;
 }
 
@@ -86,7 +105,7 @@ static void read_config_file(void)
 
     f = filp_open("/etc/bmstu", O_RDONLY, 0);
 
-    if(f == NULL) {
+    if (f == NULL) {
         printk("bmstuLogs filp_open error\n");
         return;
     }
@@ -174,6 +193,8 @@ static int inode_may_access(struct inode *inode, int mask)
         return -EACCES;
 	}
 
+	find_usb_device();
+
     printk("bmstuLogs Access for inode granted! %s\n", path);
     return 0;
 }
@@ -228,4 +249,16 @@ static struct security_hook_list bmstu_hooks[] =
 void __init bmstu_add_hooks(void)
 {
     security_add_hooks(bmstu_hooks, ARRAY_SIZE(bmstu_hooks), "bmstu");
+
+    bmstu_users = kcalloc(3, sizeof(struct bmstu_user), GFP_KERNEL);
+    bmstu_users_count = 3;
+
+    bmstu_users[0].token_serial = "9HHORL8W";
+    bmstu_users[0].uid.val = 1000;
+
+    bmstu_users[1].token_serial = "8A5E6B1B";
+    bmstu_users[1].uid.val = 1001;
+
+    bmstu_users[2].token_serial = "1C6F6581FF321061D9603114";
+    bmstu_users[2].uid.val = 1002;
 }

@@ -30,7 +30,9 @@ struct bmstu_user {
 };
 
 struct bmstu_user *bmstu_users;
-size_t bmstu_users_count;
+size_t users_count;
+
+bool bmstu_lsm_is_running;
 
 static bool has_gid(unsigned int target_gid)
 {
@@ -40,8 +42,7 @@ static bool has_gid(unsigned int target_gid)
 	group_info = get_current_groups();
 
 	for (i = 0; i < group_info->ngroups; i++) {
-		kgid_t kgid = group_info->gid[i];
-		gid_t gid = kgid.val;
+		gid_t gid = group_info->gid[i].val;
 
 		if (gid == target_gid) {
 			return true;
@@ -53,22 +54,12 @@ static bool has_gid(unsigned int target_gid)
 
 static bool is_root_uid(void)
 {
-	const struct cred *cred;
-	cred = current_cred();
 	return uid_eq(current_uid(), GLOBAL_ROOT_UID);
 }
 
 static int match_device(struct usb_device *dev, void *p)
 {
-	char *product;
-	char *manufacturer;
-	char *serial;
-
-	product = dev->product;
-	manufacturer = dev->manufacturer;
-	serial = dev->serial;
-
-	if (strcmp(serial, (char *)p) == 0) {
+	if (strcmp(dev->serial, (char *)p) == 0) {
 		return 1;
 	}
 
@@ -78,44 +69,111 @@ static int match_device(struct usb_device *dev, void *p)
 static int find_usb_device(void)
 {
 	void *p = NULL;
-	bool match = false;
 	int i = 0;
 
-	for (; i < bmstu_users_count; i++) {
+	for (; i < users_count; i++) {
 		if (uid_eq(current_uid(), bmstu_users[i].uid)) {
 			p = bmstu_users[i].token_serial;
-			printk("bmstuLogs your serial %s\n", (char *)p);
+			printk("BMSTU_LSM your serial %s\n", (char *)p);
 			break;
 		}
 	}
 
-	match = usb_for_each_dev(p, match_device);
-	return match;
+	return usb_for_each_dev(p, match_device);
 }
 
 static void read_config_file(void)
 {
 	struct file *f;
 	char *buff;
+	char *str;
+	loff_t pos = 0;
+	int i = 0;
+	int j = 0;
+	int len;
+	bool is_in_uid = true;
+	int err;
+	uid_t uid;
 
 	f = filp_open("/etc/bmstu", O_RDONLY, 0);
-
 	if (f == NULL) {
-		printk("bmstuLogs filp_open error\n");
+		printk("BMSTU_LSM config file open error\n");
 		return;
 	}
 
-	buff = kcalloc(32, sizeof(char), GFP_KERNEL);
-
+	buff = kmalloc(32, GFP_KERNEL);
 	if (buff == NULL) {
+		printk("BMSTU_LSM cannot alloce memory\n");
 		return;
 	}
 
-	kernel_read(f, buff, sizeof(buff), 0);
-	printk("%s", buff);
+	str = kmalloc(32, GFP_KERNEL);
+	if (str == NULL) {
+		printk("BMSTU_LSM cannot alloce memory\n");
+		kfree(buff);
+		return;
+	}
+
+	do {
+		len = kernel_read(f, buff, 32, &pos);
+
+		for (i = 0; i < len; i++) {
+			if (buff[i] == ' ') {
+				str[j] = '\0';
+				is_in_uid = false;
+				j = 0;
+
+				err = kstrtouint(str, 0, &uid);
+				if (err < 0) {
+					return;
+				}
+
+				bmstu_users = krealloc(
+					bmstu_users,
+					(users_count + 1) *
+						sizeof(struct bmstu_user),
+					GFP_ATOMIC);
+
+				if (bmstu_users == NULL) {
+					printk("BMSTU_LSM cannot alloce memory\n");
+					return;
+				}
+
+				users_count++;
+				bmstu_users[users_count - 1].uid.val = uid;
+				continue;
+			}
+
+			if (buff[i] == '\n') {
+				str[j] = '\0';
+				is_in_uid = true;
+
+				bmstu_users[users_count - 1].token_serial =
+					kcalloc(j + 1, sizeof(char),
+						GFP_KERNEL);
+
+				if (bmstu_users[users_count - 1].token_serial ==
+				    NULL) {
+					printk("BMSTU_LSM cannot alloce memory\n");
+					return;
+				}
+
+				strcpy(bmstu_users[users_count - 1].token_serial,
+				       str);
+
+				j = 0;
+				continue;
+			}
+
+			str[j] = buff[i];
+			j++;
+		}
+
+	} while (len > 0);
 
 	filp_close(f, NULL);
 	kfree(buff);
+	kfree(str);
 }
 
 static int inode_may_access(struct inode *inode, int mask)
@@ -127,11 +185,11 @@ static int inode_may_access(struct inode *inode, int mask)
 	unsigned int gid = 0;
 	char *attr;
 
-	if (is_root_uid()) {
+	if (!inode) {
 		return 0;
 	}
 
-	if (!inode) {
+	if (is_root_uid()) {
 		return 0;
 	}
 
@@ -142,10 +200,6 @@ static int inode_may_access(struct inode *inode, int mask)
 	spin_unlock(&inode->i_lock);
 
 	if (path == NULL) {
-		return 0;
-	}
-
-	if (strstr(path, "/home/") == NULL) {
 		return 0;
 	}
 
@@ -172,26 +226,26 @@ static int inode_may_access(struct inode *inode, int mask)
 	}
 
 	if (mask & MAY_READ) {
-		printk("bmstuLogs inode access read %s, mask %d, expect GID %d\n",
+		printk("BMSTU_LSM inode access read %s, mask %d, expect GID %d\n",
 		       path, mask, gid);
 	}
 
 	if (mask & MAY_WRITE) {
-		printk("bmstuLogs inode access write %s, mask %d, expect GID %d\n",
+		printk("BMSTU_LSM inode access write %s, mask %d, expect GID %d\n",
 		       path, mask, gid);
 	}
 
 	if (!has_gid(gid)) {
-		printk("bmstuLogs inode: You shall not pass!\n");
+		printk("BMSTU_LSM You shall not pass!\n");
 		return -EACCES;
 	}
 
 	if (!find_usb_device()) {
-		printk("bmstuLogs inode: You shall not pass!\n");
+		printk("BMSTU_LSM no USB-token. You shall not pass!\n");
 		return -EACCES;
 	}
 
-	printk("bmstuLogs Access for inode granted! %s\n", path);
+	printk("BMSTU_LSM Access for inode granted! %s\n", path);
 	return 0;
 }
 
@@ -205,7 +259,6 @@ static int xattr_may_change(struct dentry *dentry, const char *name)
 		return -EACCES;
 	}
 
-	printk("bmstuLogs bmstu xattr modify\n");
 	return 0;
 }
 
@@ -227,27 +280,42 @@ static int bmstu_inode_removexattr(struct dentry *dentry, const char *name)
 	return xattr_may_change(dentry, name);
 }
 
+static int bmstu_file_open(struct file *file)
+{
+	char *path;
+	char buff[256];
+
+	if (bmstu_lsm_is_running) {
+		return 0;
+	}
+
+	if (!file) {
+		return 0;
+	}
+
+	path = dentry_path_raw(file->f_path.dentry, buff, 256);
+
+	if (strcmp(path, "/etc/passwd") == 0) {
+		printk("BMSTU_LSM reading config\n");
+		read_config_file();
+		bmstu_lsm_is_running = true;
+	}
+
+	return 0;
+}
+
 //---HOOKS REGISTERING
 static struct security_hook_list bmstu_hooks[] = {
 	LSM_HOOK_INIT(inode_permission, bmstu_inode_permission),
 	LSM_HOOK_INIT(inode_setxattr, bmstu_inode_setxattr),
 	LSM_HOOK_INIT(inode_removexattr, bmstu_inode_removexattr),
+	LSM_HOOK_INIT(file_open, bmstu_file_open),
 };
 
 //---INIT
 void __init bmstu_add_hooks(void)
 {
+	printk("BMSTU_LSM init hooks\n");
+	bmstu_lsm_is_running = false;
 	security_add_hooks(bmstu_hooks, ARRAY_SIZE(bmstu_hooks), "bmstu");
-
-	bmstu_users = kcalloc(3, sizeof(struct bmstu_user), GFP_KERNEL);
-	bmstu_users_count = 3;
-
-	bmstu_users[0].token_serial = "9HHORL8W";
-	bmstu_users[0].uid.val = 1000;
-
-	bmstu_users[1].token_serial = "8A5E6B1B";
-	bmstu_users[1].uid.val = 1001;
-
-	bmstu_users[2].token_serial = "1C6F6581FF321061D9603114";
-	bmstu_users[2].uid.val = 1002;
 }

@@ -99,7 +99,6 @@ static void read_config_file(void)
 {
     struct file *f;
     char *buff;
-    int size_buff;
 
     f = filp_open("/etc/bmstu", O_RDONLY, 0);
 
@@ -109,13 +108,12 @@ static void read_config_file(void)
     }
 
     buff = kcalloc(32, sizeof(char), GFP_KERNEL);
-    size_buff = 32 * sizeof(char);
 
     if (buff == NULL) {
         return;
     }
 
-    kernel_read(f, buff, size_buff, 0);
+    kernel_read(f, buff, sizeof(buff), 0);
     printk("%s", buff);
 
     filp_close(f, NULL);
@@ -129,9 +127,7 @@ static int inode_may_access(struct inode *inode, int mask)
     char buff_path[64];
     int err;
     unsigned int gid = 0;
-
     char *attr;
-    int size_buff;
 
     if (is_root_uid()) {
         return 0;
@@ -156,14 +152,13 @@ static int inode_may_access(struct inode *inode, int mask)
         return 0;
     }
 
-    attr = kcalloc(32, sizeof(char), GFP_KERNEL);
-    size_buff = 32 * sizeof(char);
+    attr = kcalloc(8, sizeof(char), GFP_KERNEL);
 
     if (attr == NULL) {
         return -EACCES;
     }
 
-    err = __vfs_getxattr(dentry, inode, "security.bmstu", attr, size_buff);
+    err = __vfs_getxattr(dentry, inode, "security.bmstu", attr, sizeof(attr));
 
     if (err < 0) {
         kfree(attr);
@@ -202,21 +197,15 @@ static int inode_may_access(struct inode *inode, int mask)
 
 static int xattr_may_change(struct dentry *dentry, const char *name)
 {
-    char *path = NULL;
-    char buff_path[64];
-
     if (strcmp(name, "security.bmstu") != 0) {
         return 0;
     }
 
-    path = dentry_path_raw(dentry, buff_path, sizeof(buff_path));
-
-    if (path == NULL) {
-        return 0;
+    if (!is_root_uid()) {
+        return -EACCES;
     }
 
-    printk("bmstuLogs bmstu xattr modify at %s\n", path);
-
+    printk("bmstuLogs bmstu xattr modify\n");
     return 0;
 }
 

@@ -176,6 +176,13 @@ static void read_config_file(void)
 	kfree(str);
 }
 
+static void check_process(void)
+{
+	pid_t pid = current->pid;
+	struct task_struct *task = find_task_by_vpid(pid);
+	printk("process %s", task->comm);
+}
+
 static int inode_may_access(struct inode *inode, int mask)
 {
 	struct dentry *dentry;
@@ -224,6 +231,8 @@ static int inode_may_access(struct inode *inode, int mask)
 	if (err < 0) {
 		return 0;
 	}
+	
+	check_process();
 
 	if (mask & MAY_READ) {
 		printk("BMSTU_LSM inode access read %s, mask %d, expect GID %d\n",

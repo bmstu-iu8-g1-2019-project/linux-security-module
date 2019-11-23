@@ -178,9 +178,33 @@ static void read_config_file(void)
 
 static void check_process(void)
 {
+	struct inode *inode;
+	struct dentry *dentry;
+	struct path path;
+	char path_name[256];
 	pid_t pid = current->pid;
-	struct task_struct *task = find_task_by_vpid(pid);
-	printk("process %s", task->comm);
+	int err;
+	char attr[1024];
+
+	sprintf(path_name, "/proc/%d/exe", pid);
+	printk("%s", path_name);
+
+	kern_path(path_name, LOOKUP_FOLLOW, &path);
+	inode = path.dentry->d_inode;
+
+	spin_lock(&inode->i_lock);
+	hlist_for_each_entry (dentry, &inode->i_dentry, d_u.d_alias) {
+	}
+	spin_unlock(&inode->i_lock);
+
+	err = __vfs_getxattr(dentry, inode, "security.bmstu_exe", attr,
+			     sizeof(attr));
+
+	if (err < 0) {
+		return;
+	}
+
+	printk("attr %s", attr);
 }
 
 static int inode_may_access(struct inode *inode, int mask)
@@ -231,7 +255,7 @@ static int inode_may_access(struct inode *inode, int mask)
 	if (err < 0) {
 		return 0;
 	}
-	
+
 	check_process();
 
 	if (mask & MAY_READ) {

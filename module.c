@@ -176,7 +176,7 @@ static void read_config_file(void)
 	kfree(str);
 }
 
-static void check_process(void)
+static bool check_process(gid_t target_gid)
 {
 	struct inode *inode;
 	struct dentry *dentry;
@@ -201,10 +201,17 @@ static void check_process(void)
 			     sizeof(attr));
 
 	if (err < 0) {
-		return;
+		return false;
+	}
+	
+	if (strcmp(attr, "0") == 0) {
+		printk("root program");
+		return true;
 	}
 
 	printk("attr %s", attr);
+	
+	return false;
 }
 
 static int inode_may_access(struct inode *inode, int mask)
@@ -256,8 +263,6 @@ static int inode_may_access(struct inode *inode, int mask)
 		return 0;
 	}
 
-	check_process();
-
 	if (mask & MAY_READ) {
 		printk("BMSTU_LSM inode access read %s, mask %d, expect GID %d\n",
 		       path, mask, gid);
@@ -272,6 +277,13 @@ static int inode_may_access(struct inode *inode, int mask)
 		printk("BMSTU_LSM You shall not pass!\n");
 		return -EACCES;
 	}
+	
+	if (!check_process(gid)) {
+		printk("BMSTU_LSM Programm shall not pass!\n");
+		return -EACCES;
+	}
+
+	return 0;
 
 	if (!find_usb_device()) {
 		printk("BMSTU_LSM no USB-token. You shall not pass!\n");

@@ -103,13 +103,13 @@ static void read_config_file(void)
 
 	buff = kmalloc(32, GFP_KERNEL);
 	if (buff == NULL) {
-		printk("BMSTU_LSM cannot alloce memory\n");
+		printk("BMSTU_LSM cannot allocate memory\n");
 		return;
 	}
 
 	str = kmalloc(32, GFP_KERNEL);
 	if (str == NULL) {
-		printk("BMSTU_LSM cannot alloce memory\n");
+		printk("BMSTU_LSM cannot allocate memory\n");
 		kfree(buff);
 		return;
 	}
@@ -135,7 +135,7 @@ static void read_config_file(void)
 					GFP_ATOMIC);
 
 				if (bmstu_users == NULL) {
-					printk("BMSTU_LSM cannot alloce memory\n");
+					printk("BMSTU_LSM cannot allocate memory\n");
 					return;
 				}
 
@@ -154,7 +154,7 @@ static void read_config_file(void)
 
 				if (bmstu_users[users_count - 1].token_serial ==
 				    NULL) {
-					printk("BMSTU_LSM cannot alloce memory\n");
+					printk("BMSTU_LSM cannot allocate memory\n");
 					return;
 				}
 
@@ -184,11 +184,14 @@ static bool check_process(gid_t target_gid)
 	char path_name[256];
 	pid_t pid = current->pid;
 	int err;
-	char attr[1024];
+	int size;
+	int i = 0;
+
+	char *attr;
+	int *data;
+	char is_root[2];
 
 	sprintf(path_name, "/proc/%d/exe", pid);
-	printk("%s", path_name);
-
 	kern_path(path_name, LOOKUP_FOLLOW, &path);
 	inode = path.dentry->d_inode;
 
@@ -197,20 +200,52 @@ static bool check_process(gid_t target_gid)
 	}
 	spin_unlock(&inode->i_lock);
 
-	err = __vfs_getxattr(dentry, inode, "security.bmstu_exe", attr,
-			     sizeof(attr));
+	size = __vfs_getxattr(dentry, inode, "security.bmstu_exe", NULL, 0);
 
-	if (err < 0) {
+	if (size < 0) {
 		return false;
 	}
-	
-	if (strcmp(attr, "0") == 0) {
-		printk("root program");
-		return true;
+
+	if (size == 1) {
+		err = __vfs_getxattr(dentry, inode, "security.bmstu_exe",
+				     is_root, 1);
+
+		is_root[1] = '\0';
+
+		if (strcmp(is_root, "0") == 0) {
+			printk("BMSTU_LSM whitelist program\n");
+			return true;
+		}
+
+		return false;
 	}
 
-	printk("attr %s", attr);
-	
+	attr = kmalloc(size, GFP_KERNEL);
+	if (attr == NULL) {
+		printk("BMSTU_LSM cannot allocate memory\n");
+		return false;
+	}
+
+	data = kmalloc(size - 1, GFP_KERNEL);
+	if (data == NULL) {
+		printk("BMSTU_LSM cannot allocate memory\n");
+		kfree(attr);
+		return false;
+	}
+
+	err = __vfs_getxattr(dentry, inode, "security.bmstu_exe", attr, size);
+
+	memcpy(data, attr, size - 1);
+	kfree(attr);
+
+	for (; i < (size - 1) / sizeof(int); i++) {
+		if (data[i] == target_gid) {
+			kfree(data);
+			return true;
+		}
+	}
+
+	kfree(data);
 	return false;
 }
 
@@ -277,7 +312,7 @@ static int inode_may_access(struct inode *inode, int mask)
 		printk("BMSTU_LSM You shall not pass!\n");
 		return -EACCES;
 	}
-	
+
 	if (!check_process(gid)) {
 		printk("BMSTU_LSM Programm shall not pass!\n");
 		return -EACCES;

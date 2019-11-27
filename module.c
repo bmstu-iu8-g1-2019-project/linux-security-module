@@ -22,7 +22,7 @@
 MODULE_AUTHOR("fktrc");
 MODULE_DESCRIPTION("BMSTU Linux Security Module");
 MODULE_LICENSE("GPL");
-MODULE_VERSION("0.0.1");
+MODULE_VERSION("1.0.0");
 
 struct bmstu_user {
 	kuid_t uid;
@@ -34,6 +34,7 @@ size_t users_count;
 
 bool bmstu_lsm_is_running;
 
+// Checks has curent user access for some label
 static bool has_gid(unsigned int target_gid)
 {
 	struct group_info *group_info;
@@ -52,11 +53,14 @@ static bool has_gid(unsigned int target_gid)
 	return false;
 }
 
+// Checks is curent user root
 static bool is_root_uid(void)
 {
 	return uid_eq(current_uid(), GLOBAL_ROOT_UID);
 }
 
+// This func will be called for each plugged device
+// void *p is required device serial
 static int match_device(struct usb_device *dev, void *p)
 {
 	if (strcmp(dev->serial, (char *)p) == 0) {
@@ -66,6 +70,7 @@ static int match_device(struct usb_device *dev, void *p)
 	return 0;
 }
 
+// Checks is device plugged
 static int find_usb_device(void)
 {
 	void *p = NULL;
@@ -74,7 +79,6 @@ static int find_usb_device(void)
 	for (; i < users_count; i++) {
 		if (uid_eq(current_uid(), bmstu_users[i].uid)) {
 			p = bmstu_users[i].token_serial;
-			printk("BMSTU_LSM your serial %s\n", (char *)p);
 			break;
 		}
 	}
@@ -82,6 +86,7 @@ static int find_usb_device(void)
 	return usb_for_each_dev(p, match_device);
 }
 
+// Reading config file on startup
 static void read_config_file(void)
 {
 	struct file *f;
@@ -125,6 +130,8 @@ static void read_config_file(void)
 
 				err = kstrtouint(str, 0, &uid);
 				if (err < 0) {
+					kfree(str);
+					kfree(buff);
 					return;
 				}
 
@@ -136,6 +143,8 @@ static void read_config_file(void)
 
 				if (bmstu_users == NULL) {
 					printk("BMSTU_LSM cannot allocate memory\n");
+					kfree(str);
+					kfree(buff);
 					return;
 				}
 
@@ -155,6 +164,8 @@ static void read_config_file(void)
 				if (bmstu_users[users_count - 1].token_serial ==
 				    NULL) {
 					printk("BMSTU_LSM cannot allocate memory\n");
+					kfree(str);
+					kfree(buff);
 					return;
 				}
 
@@ -172,10 +183,11 @@ static void read_config_file(void)
 	} while (len > 0);
 
 	filp_close(f, NULL);
-	kfree(buff);
 	kfree(str);
+	kfree(buff);
 }
 
+// Checks has curent process access for some label
 static bool check_process(gid_t target_gid)
 {
 	struct inode *inode;
@@ -191,6 +203,7 @@ static bool check_process(gid_t target_gid)
 	int *data;
 	char is_root[2];
 
+	// Searching for process binary file
 	sprintf(path_name, "/proc/%d/exe", pid);
 	kern_path(path_name, LOOKUP_FOLLOW, &path);
 	inode = path.dentry->d_inode;
@@ -200,12 +213,15 @@ static bool check_process(gid_t target_gid)
 	}
 	spin_unlock(&inode->i_lock);
 
+	// Reading process binary permissions
 	size = __vfs_getxattr(dentry, inode, "security.bmstu_exe", NULL, 0);
 
+	// No permissions
 	if (size < 0) {
 		return false;
 	}
 
+	// Checks has binary full rights
 	if (size == 1) {
 		err = __vfs_getxattr(dentry, inode, "security.bmstu_exe",
 				     is_root, 1);
@@ -232,6 +248,7 @@ static bool check_process(gid_t target_gid)
 
 	for (; i < (size - 1) / sizeof(int); i++) {
 		if (data[i] == target_gid) {
+			kfree(attr);
 			return true;
 		}
 	}
@@ -240,6 +257,7 @@ static bool check_process(gid_t target_gid)
 	return false;
 }
 
+// This system hook called every time when some proccess accessing any file
 static int inode_may_access(struct inode *inode, int mask)
 {
 	struct dentry *dentry;
@@ -257,6 +275,7 @@ static int inode_may_access(struct inode *inode, int mask)
 		return 0;
 	}
 
+	// Getting path of inode
 	spin_lock(&inode->i_lock);
 	hlist_for_each_entry (dentry, &inode->i_dentry, d_u.d_alias) {
 		path = dentry_path_raw(dentry, buff_path, sizeof(buff_path));
@@ -273,6 +292,7 @@ static int inode_may_access(struct inode *inode, int mask)
 		return -EACCES;
 	}
 
+	// Reading file security label
 	err = __vfs_getxattr(dentry, inode, "security.bmstu", attr,
 			     sizeof(attr));
 
@@ -318,12 +338,14 @@ static int inode_may_access(struct inode *inode, int mask)
 	return 0;
 }
 
+// This system hook called every time when file xattr changing
 static int xattr_may_change(struct dentry *dentry, const char *name)
 {
 	if (strcmp(name, "security.bmstu") != 0) {
 		return 0;
 	}
 
+	// Only root can change security label
 	if (!is_root_uid()) {
 		return -EACCES;
 	}
@@ -349,6 +371,7 @@ static int bmstu_inode_removexattr(struct dentry *dentry, const char *name)
 	return xattr_may_change(dentry, name);
 }
 
+// Hook to run initial startup
 static int bmstu_file_open(struct file *file)
 {
 	char *path;

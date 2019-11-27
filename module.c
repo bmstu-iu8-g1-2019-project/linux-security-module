@@ -226,26 +226,17 @@ static bool check_process(gid_t target_gid)
 		return false;
 	}
 
-	data = kmalloc(size - 1, GFP_KERNEL);
-	if (data == NULL) {
-		printk("BMSTU_LSM cannot allocate memory\n");
-		kfree(attr);
-		return false;
-	}
-
 	err = __vfs_getxattr(dentry, inode, "security.bmstu_exe", attr, size);
 
-	memcpy(data, attr, size - 1);
-	kfree(attr);
+	data = (int *)attr;
 
 	for (; i < (size - 1) / sizeof(int); i++) {
 		if (data[i] == target_gid) {
-			kfree(data);
 			return true;
 		}
 	}
 
-	kfree(data);
+	kfree(attr);
 	return false;
 }
 
@@ -317,8 +308,6 @@ static int inode_may_access(struct inode *inode, int mask)
 		printk("BMSTU_LSM Programm shall not pass!\n");
 		return -EACCES;
 	}
-
-	return 0;
 
 	if (!find_usb_device()) {
 		printk("BMSTU_LSM no USB-token. You shall not pass!\n");

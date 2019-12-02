@@ -339,9 +339,10 @@ static int inode_may_access(struct inode *inode, int mask)
 }
 
 // This system hook called every time when file xattr changing
-static int xattr_may_change(struct dentry *dentry, const char *name)
+static int xattr_may_access(struct dentry *dentry, const char *name)
 {
-	if (strcmp(name, "security.bmstu") != 0) {
+	if (strcmp(name, "security.bmstu") != 0 &&
+	    strcmp(name, "security.bmstu_exe") != 0) {
 		return 0;
 	}
 
@@ -360,15 +361,20 @@ static int bmstu_inode_permission(struct inode *inode, int mask)
 	return inode_may_access(inode, mask);
 }
 
+static int bmstu_inode_getxattr(struct dentry *dentry, const char *name)
+{
+	return xattr_may_access(dentry, name);
+}
+
 static int bmstu_inode_setxattr(struct dentry *dentry, const char *name,
 				const void *value, size_t size, int flags)
 {
-	return xattr_may_change(dentry, name);
+	return xattr_may_access(dentry, name);
 }
 
 static int bmstu_inode_removexattr(struct dentry *dentry, const char *name)
 {
-	return xattr_may_change(dentry, name);
+	return xattr_may_access(dentry, name);
 }
 
 // Hook to run initial startup
@@ -399,6 +405,7 @@ static int bmstu_file_open(struct file *file)
 //---HOOKS REGISTERING
 static struct security_hook_list bmstu_hooks[] = {
 	LSM_HOOK_INIT(inode_permission, bmstu_inode_permission),
+	LSM_HOOK_INIT(inode_getxattr, bmstu_inode_getxattr),
 	LSM_HOOK_INIT(inode_setxattr, bmstu_inode_setxattr),
 	LSM_HOOK_INIT(inode_removexattr, bmstu_inode_removexattr),
 	LSM_HOOK_INIT(file_open, bmstu_file_open),
